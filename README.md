@@ -1,286 +1,397 @@
-# SeaweedFS Webhook Setup
+# FileManager SDK
 
-This project provides a complete setup for SeaweedFS with HTTP webhook and RabbitMQ notifications, plus a .NET 8 API to handle events.
+A comprehensive, provider-agnostic file management SDK for .NET 9 that simplifies file storage operations across multiple cloud and on-premise object storage providers.
 
-## Architecture
+[![.NET Version](https://img.shields.io/badge/.NET-9.0-purple)](https://dotnet.microsoft.com/)
+[![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
+## Features
+
+- 🔌 **Provider-Agnostic Interface**: Work with MinIO, SeaweedFS, and S3-compatible storage through a unified API
+- 🗄️ **Multi-Database Support**: SQL Server, PostgreSQL, MySQL, and SQLite
+- ✅ **Built-in Validation**: FluentValidation-powered request validation with configurable rules
+- 🔒 **Security First**: Hash-based deduplication, virus scanning hooks, and status workflow
+- 📊 **File Lifecycle Management**: Automatic status transitions (Pending → Validated → Scanned → Available)
+- 🎯 **Clean Architecture**: DDD principles with Domain, Application, and Infrastructure layers
+- 🔄 **Event-Driven**: Domain events for file operations (upload, validate, scan, reject, delete)
+- 🚀 **Performance Optimized**: Batch operations, connection pooling, and efficient queries
+- 📦 **Easy Integration**: Simple dependency injection with minimal configuration
+
+## Table of Contents
+
+- [Installation](#installation)
+- [Quick Start](#quick-start)
+- [Configuration](#configuration)
+- [Usage Examples](#usage-examples)
+- [Architecture](#architecture)
+- [Documentation](#documentation)
+- [Supported Providers](#supported-providers)
+- [Contributing](#contributing)
+- [License](#license)
+
+## Installation
+
+```bash
+dotnet add package FileManager.SDK
 ```
-┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
-│  SeaweedFS      │     │  SeaweedFS      │     │  SeaweedFS      │
-│  Master         │────▶│  Volume         │────▶│  Filer          │
-│  :9333          │     │  :8080          │     │  :8888          │
-└─────────────────┘     └─────────────────┘     └────────┬────────┘
-                                                         │
-                                    ┌────────────────────┼────────────────────┐
-                                    │                    │                    │
-                                    ▼                    ▼                    │
-                        ┌─────────────────┐  ┌─────────────────┐              │
-                        │  HTTP Webhook   │  │  RabbitMQ       │              │
-                        │  (sync)         │  │  (async)        │              │
-                        └────────┬────────┘  └────────┬────────┘              │
-                                 │                    │                       │
-                                 └────────────────────┼───────────────────────┘
-                                                      │
-                                                      ▼
-                                          ┌─────────────────┐
-                                          │  .NET Webhook   │
-                                          │  API :5000      │
-                                          └─────────────────┘
-```
 
-## Components
-
-| Component | Image/Version | Port | Description |
-|-----------|---------------|------|-------------|
-| Master | `chrislusf/seaweedfs:3.59` | 9333 | Cluster management |
-| Volume | `chrislusf/seaweedfs:3.59` | 8080 | File storage |
-| Filer | `chrislusf/seaweedfs:3.59` | 8888 | File system abstraction |
-| S3 Gateway | `chrislusf/seaweedfs:3.59` | 8333 | S3-compatible API |
-| RabbitMQ | `rabbitmq:3.12-management-alpine` | 5672, 15672 | Message broker |
-| Webhook API | .NET 8 | 5000 | Event handler |
-
-## .NET Package Requirements
+Or add to your `.csproj`:
 
 ```xml
-<PackageReference Include="RabbitMQ.Client" Version="6.8.1" />
-<PackageReference Include="System.Text.Json" Version="8.0.4" />
-<PackageReference Include="AspNetCore.HealthChecks.Rabbitmq" Version="8.0.1" />
-<PackageReference Include="Serilog.AspNetCore" Version="8.0.2" />
-<PackageReference Include="Serilog.Sinks.Console" Version="6.0.0" />
-<PackageReference Include="Swashbuckle.AspNetCore" Version="6.6.2" />
+<PackageReference Include="FileManager.SDK" Version="1.0.0" />
 ```
 
 ## Quick Start
 
-### 1. Start the services
+### 1. Configure Services
 
-```bash
-# Clone or create the project structure
-cd seaweedfs-setup
+```csharp
+using FileManager.Infrastructure;
 
-# Start all services
-docker-compose up -d
+var builder = WebApplication.CreateBuilder(args);
 
-# Check logs
-docker-compose logs -f
+// Register FileManager with your preferred storage provider
+builder.Services.AddFileManager(builder.Configuration);
+
+var app = builder.Build();
+app.Run();
 ```
 
-### 2. Verify services are running
-
-```bash
-# Check SeaweedFS master
-curl http://localhost:9333/cluster/status
-
-# Check filer
-curl http://localhost:8888/
-
-# Check RabbitMQ management
-open http://localhost:15672  # Login: seaweed / seaweed123
-
-# Check webhook API
-curl http://localhost:5000/health
-```
-
-### 3. Upload a test file
-
-```bash
-# Upload via filer HTTP API
-curl -F "file=@test.txt" http://localhost:8888/uploads/
-
-# Upload via S3 (using AWS CLI)
-aws --endpoint-url http://localhost:8333 s3 cp test.txt s3://bucket/test.txt
-```
-
-### 4. Check webhook logs
-
-```bash
-docker-compose logs -f webhook-api
-```
-
-## Authentication
-
-The webhook API supports multiple authentication methods:
-
-### 1. Query Parameter (Used by SeaweedFS)
-
-SeaweedFS doesn't support custom headers in notifications, so we use a query parameter:
-
-```
-url = "http://webhook-api:5000/api/seaweedfs/webhook?secret=your-secret-key"
-```
-
-### 2. X-Webhook-Secret Header
-
-For external clients:
-
-```bash
-curl -X POST http://localhost:5000/api/seaweedfs/webhook \
-  -H "X-Webhook-Secret: your-super-secret-key-change-in-production" \
-  -H "Content-Type: application/json" \
-  -d '{"directory": "/test", "name": "file.txt"}'
-```
-
-### 3. Bearer Token
-
-```bash
-curl -X POST http://localhost:5000/api/seaweedfs/webhook \
-  -H "Authorization: Bearer your-super-secret-key-change-in-production" \
-  -H "Content-Type: application/json" \
-  -d '{"directory": "/test", "name": "file.txt"}'
-```
-
-### 4. HMAC Signature (X-Hub-Signature-256)
-
-For GitHub-style webhook verification:
-
-```bash
-PAYLOAD='{"directory": "/test", "name": "file.txt"}'
-SIGNATURE=$(echo -n "$PAYLOAD" | openssl dgst -sha256 -hmac "your-secret-key" | awk '{print $2}')
-
-curl -X POST http://localhost:5000/api/seaweedfs/webhook \
-  -H "X-Hub-Signature-256: sha256=$SIGNATURE" \
-  -H "Content-Type: application/json" \
-  -d "$PAYLOAD"
-```
-
-## Event Format
-
-SeaweedFS sends events in this format:
+### 2. Configure appsettings.json
 
 ```json
 {
-  "directory": "/uploads",
-  "name": "document.pdf",
-  "isDirectory": false,
-  "oldEntry": null,
-  "newEntry": {
-    "name": "document.pdf",
-    "isDirectory": false,
-    "chunks": [
-      {
-        "file_id": "1,01234567890abc",
-        "size": 1024,
-        "mtime": 1699999999
-      }
-    ],
-    "attributes": {
-      "mtime": 1699999999,
-      "crtime": 1699999999,
-      "mode": 420,
-      "uid": 0,
-      "gid": 0,
-      "mime": "application/pdf",
-      "fileSize": 1024
+  "FileManager": {
+    "DefaultProvider": "MinIo",
+    "ValidationEnabled": true,
+    "VirusScanningEnabled": false,
+    "PresignedUrlExpiration": "01:00:00",
+    "MaxFileSizeBytes": 5368709120
+  },
+  "Storage": {
+    "MinIO": {
+      "Endpoint": "localhost:9000",
+      "AccessKey": "minioadmin",
+      "SecretKey": "minioadmin",
+      "BucketName": "files",
+      "UseSSL": false
+    }
+  },
+  "Database": {
+    "Provider": "SqlServer",
+    "ConnectionString": "Server=(localdb)\\mssqllocaldb;Database=FileManager;Trusted_Connection=True;"
+  }
+}
+```
+
+### 3. Use the SDK
+
+```csharp
+public class FileController : ControllerBase
+{
+    private readonly IFileService _fileService;
+
+    public FileController(IFileService fileService)
+    {
+        _fileService = fileService;
+    }
+
+    [HttpPost("upload")]
+    public async Task<IActionResult> Upload(IFormFile file)
+    {
+        using var stream = file.OpenReadStream();
+
+        var request = new UploadRequest(
+            Content: stream,
+            FileName: file.FileName,
+            Path: "/uploads",
+            Size: file.Length,
+            ContentType: file.ContentType,
+            Hash: null, // Optional: provide file hash for deduplication
+            Metadata: null
+        );
+
+        var fileMetadata = await _fileService.UploadFileAsync(request);
+
+        return Ok(new { fileMetadata.Id, fileMetadata.Status });
+    }
+
+    [HttpGet("{id:guid}/download")]
+    public async Task<IActionResult> Download(Guid id)
+    {
+        var stream = await _fileService.DownloadFileAsync(id);
+        var metadata = await _fileService.GetFileMetadataAsync(id);
+
+        return File(stream, metadata.ContentType, metadata.FileName);
+    }
+}
+```
+
+## Configuration
+
+### Storage Providers
+
+Choose one of the supported storage providers:
+
+**MinIO** (S3-compatible, self-hosted):
+```json
+{
+  "FileManager": { "DefaultProvider": "MinIo" },
+  "Storage": {
+    "MinIO": {
+      "Endpoint": "localhost:9000",
+      "AccessKey": "minioadmin",
+      "SecretKey": "minioadmin",
+      "BucketName": "files",
+      "UseSSL": false
     }
   }
 }
 ```
 
-### Event Types
-
-| Event | oldEntry | newEntry | Description |
-|-------|----------|----------|-------------|
-| Create | null | present | New file uploaded |
-| Update | present | present | File modified |
-| Delete | present | null | File deleted |
-
-## Configuration
-
-### Environment Variables
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `Webhook__SecretKey` | - | Secret key for authentication |
-| `Webhook__ValidateSignature` | `true` | Enable/disable auth validation |
-| `RabbitMQ__HostName` | `localhost` | RabbitMQ host |
-| `RabbitMQ__Port` | `5672` | RabbitMQ port |
-| `RabbitMQ__UserName` | `guest` | RabbitMQ username |
-| `RabbitMQ__Password` | `guest` | RabbitMQ password |
-| `RabbitMQ__Exchange` | `seaweedfs` | Exchange name |
-| `RabbitMQ__Queue` | `seaweedfs_events` | Queue name |
-
-### SeaweedFS filer.toml
-
-Key notification settings:
-
-```toml
-# HTTP webhook
-[notification.http]
-enabled = true
-url = "http://webhook-api:5000/api/seaweedfs/webhook?secret=your-key"
-timeout = 10
-
-# RabbitMQ
-[notification.amqp]
-enabled = true
-url = "amqp://user:pass@rabbitmq:5672/"
-exchange = "seaweedfs"
-exchange_type = "fanout"
-queue_name = "seaweedfs_events"
-queue_durable = true
-```
-
-## Extending the Event Handler
-
-Edit `Services/SeaweedEventHandler.cs` to add your business logic:
-
-```csharp
-private async Task HandleFileCreatedAsync(SeaweedFilerEvent seaweedEvent, CancellationToken cancellationToken)
+**SeaweedFS** (Distributed file system):
+```json
 {
-    var mimeType = seaweedEvent.NewEntry?.Attributes?.MimeType ?? string.Empty;
-    
-    // Example: Process images
-    if (mimeType.StartsWith("image/"))
-    {
-        await _imageService.GenerateThumbnailAsync(seaweedEvent.FullPath, cancellationToken);
+  "FileManager": { "DefaultProvider": "SeaweedFs" },
+  "Storage": {
+    "SeaweedFS": {
+      "FilerUrl": "http://localhost:8888",
+      "BucketName": "files"
     }
-    
-    // Example: Index documents for search
-    if (mimeType == "application/pdf")
-    {
-        await _searchService.IndexDocumentAsync(seaweedEvent.FullPath, cancellationToken);
-    }
-    
-    // Example: Send notification
-    await _notificationService.SendAsync($"New file uploaded: {seaweedEvent.FullPath}", cancellationToken);
+  }
 }
 ```
 
-## Troubleshooting
+**AWS S3** (or S3-compatible):
+```json
+{
+  "FileManager": { "DefaultProvider": "S3" },
+  "Storage": {
+    "S3": {
+      "ServiceUrl": "https://s3.amazonaws.com",
+      "AccessKey": "your-access-key",
+      "SecretKey": "your-secret-key",
+      "BucketName": "your-bucket",
+      "Region": "us-east-1"
+    }
+  }
+}
+```
 
-### Webhook not receiving events
+### Database Configuration
 
-1. Check filer logs: `docker-compose logs filer`
-2. Verify URL is reachable from filer container
-3. Check authentication secret matches
+See [Database Configuration Guide](Docs/DATABASE-CONFIGURATION.md) for detailed setup instructions.
 
-### RabbitMQ connection issues
+### Advanced Configuration
 
-1. Ensure RabbitMQ is healthy: `docker-compose ps`
-2. Check credentials match in docker-compose.yml and appsettings.json
-3. Verify exchange and queue exist in RabbitMQ management UI
+For multi-provider scenarios, dependency injection patterns, and advanced features:
+- [Dependency Injection Usage](Docs/DI-USAGE-EXAMPLE.md)
+- [Service Lifetime Guide](Docs/SERVICE-LIFETIME-GUIDE.md)
+- [Configuration Reference](Docs/CONFIGURATION.md)
 
-### Events not processing
+## Usage Examples
 
-1. Check webhook-api logs: `docker-compose logs webhook-api`
-2. Verify JSON format matches expected model
-3. Check for exceptions in event handler
+### File Upload with Validation
 
-## Production Recommendations
+```csharp
+var request = new UploadRequest(
+    Content: fileStream,
+    FileName: "document.pdf",
+    Path: "/documents",
+    Size: fileStream.Length,
+    ContentType: "application/pdf",
+    Hash: ComputeSHA256(fileStream), // Optional deduplication
+    Metadata: new Dictionary<string, string>
+    {
+        ["author"] = "John Doe",
+        ["department"] = "Engineering"
+    }
+);
 
-1. **Change all default passwords** in docker-compose.yml and filer.toml
-2. **Use HTTPS** for webhook endpoints (use nginx/traefik as reverse proxy)
-3. **Enable persistent volumes** for RabbitMQ and SeaweedFS
-4. **Set resource limits** in docker-compose.yml
-5. **Use secrets management** (Docker secrets, HashiCorp Vault, etc.)
-6. **Add retry logic** for failed webhook deliveries
-7. **Implement dead letter queue** for RabbitMQ
-8. **Add monitoring** (Prometheus metrics are exposed)
+try
+{
+    var file = await _fileService.UploadFileAsync(request);
+    Console.WriteLine($"File uploaded: {file.Id}, Status: {file.Status}");
+}
+catch (DuplicateFileException ex)
+{
+    Console.WriteLine($"File already exists: {ex.Hash}");
+}
+```
 
-## Supported SeaweedFS Versions
+### Presigned URLs for Direct Upload
 
-Tested with:
-- SeaweedFS 3.59 (recommended)
-- SeaweedFS 3.50+
+```csharp
+var request = new PresignedUploadRequest(
+    Path: "/uploads",
+    FileName: "largefile.zip",
+    ContentType: "application/zip",
+    ExpiresIn: TimeSpan.FromHours(1),
+    MaxSize: 1024 * 1024 * 100 // 100 MB
+);
 
-The notification format has been stable since version 3.x.
+var url = await _fileService.GeneratePresignedUploadUrlAsync(request);
+
+// Client uploads directly to storage using this URL
+return Ok(new { uploadUrl = url });
+```
+
+### File Lifecycle Management
+
+```csharp
+// Validate file after upload
+await _fileService.MarkAsValidatedAsync(fileId);
+
+// Mark as scanned (virus-free)
+await _fileService.MarkAsScannedAsync(fileId);
+
+// Reject file if issues found
+await _fileService.RejectFileAsync(fileId, "Contains malicious content");
+
+// Delete file
+await _fileService.DeleteFileAsync(fileId);
+```
+
+### Batch Operations
+
+```csharp
+// Delete multiple files efficiently
+var fileIds = new[] { id1, id2, id3 };
+await _fileService.DeleteFilesAsync(fileIds);
+
+// Get all pending files for processing
+var pendingFiles = await _fileService.GetPendingFilesAsync();
+foreach (var file in pendingFiles)
+{
+    // Process validation or scanning
+}
+```
+
+See [Usage Guide](Docs/USAGE-GUIDE.md) for more examples.
+
+## Architecture
+
+FileManager SDK follows Clean Architecture and Domain-Driven Design principles:
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                    Presentation Layer                    │
+│              (Your API / Application)                    │
+└────────────────────┬────────────────────────────────────┘
+                     │
+┌────────────────────▼────────────────────────────────────┐
+│               Application Layer                          │
+│  ┌──────────────────────────────────────────────────┐  │
+│  │  IFileService (Orchestration)                     │  │
+│  │  - UploadFileAsync()                              │  │
+│  │  - DownloadFileAsync()                            │  │
+│  │  - MarkAsValidatedAsync()                         │  │
+│  └──────────────────────────────────────────────────┘  │
+└────────────────────┬────────────────────────────────────┘
+                     │
+┌────────────────────▼────────────────────────────────────┐
+│                  Domain Layer                            │
+│  ┌──────────────────────────────────────────────────┐  │
+│  │  FileMetadata (Aggregate Root)                    │  │
+│  │  - Status Transitions                             │  │
+│  │  - Domain Events                                  │  │
+│  │  - Business Rules                                 │  │
+│  └──────────────────────────────────────────────────┘  │
+└────────────────────┬────────────────────────────────────┘
+                     │
+┌────────────────────▼────────────────────────────────────┐
+│              Infrastructure Layer                        │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  │
+│  │ MinIOService │  │SeaweedFsServ.│  │  S3Service   │  │
+│  └──────────────┘  └──────────────┘  └──────────────┘  │
+│  ┌──────────────────────────────────────────────────┐  │
+│  │  EF Core Repositories + Unit of Work              │  │
+│  └──────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────┘
+```
+
+### Key Concepts
+
+- **FileMetadata**: Aggregate root managing file lifecycle and status transitions
+- **IFileService**: Application service orchestrating file operations
+- **IObjectStorage**: Provider-agnostic storage interface
+- **Repository Pattern**: Data access abstraction with Unit of Work
+- **Domain Events**: FileUploaded, FileValidated, FileScanned, FileRejected, FileDeleted
+
+## Documentation
+
+### Getting Started
+- [Quick Start Guide](Docs/QUICK-START.md)
+- [Installation](Docs/INSTALLATION.md)
+- [Configuration](Docs/CONFIGURATION.md)
+
+### Guides
+- [Usage Guide](Docs/USAGE-GUIDE.md)
+- [Database Configuration](Docs/DATABASE-CONFIGURATION.md)
+- [Dependency Injection](Docs/DI-USAGE-EXAMPLE.md)
+- [Migration Guide](Docs/MIGRATION-GUIDE.md)
+
+### Advanced
+- [Architecture Overview](Docs/ARCHITECTURE.md)
+- [Domain Events](Docs/DOMAIN-EVENTS.md)
+- [Custom Storage Provider](Docs/CUSTOM-PROVIDER.md)
+- [Performance Tuning](Docs/PERFORMANCE.md)
+
+### Reference
+- [API Reference](Docs/API-REFERENCE.md)
+- [Configuration Reference](Docs/CONFIGURATION.md)
+- [Service Lifetime Guide](Docs/SERVICE-LIFETIME-GUIDE.md)
+
+## Supported Providers
+
+| Provider | Status | Description |
+|----------|--------|-------------|
+| **MinIO** | ✅ Production | S3-compatible self-hosted object storage |
+| **SeaweedFS** | 🚧 In Progress | Distributed file system with HTTP API |
+| **AWS S3** | 🚧 In Progress | Amazon S3 and S3-compatible services |
+| **Azure Blob** | 📋 Planned | Microsoft Azure Blob Storage |
+| **Google Cloud** | 📋 Planned | Google Cloud Storage |
+
+## Supported Databases
+
+- SQL Server (2019+)
+- PostgreSQL (12+)
+- MySQL (8.0+)
+- SQLite (3.x)
+
+## Requirements
+
+- .NET 9.0 or later
+- One of the supported storage providers
+- One of the supported databases
+
+## Contributing
+
+We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for details.
+
+1. Fork the repository
+2. Create a feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
+
+## License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## Support
+
+- 📧 Email: support@filemanager-sdk.com
+- 💬 Discussions: [GitHub Discussions](https://github.com/your-org/filemanager-sdk/discussions)
+- 🐛 Issues: [GitHub Issues](https://github.com/your-org/filemanager-sdk/issues)
+- 📖 Documentation: [https://docs.filemanager-sdk.com](https://docs.filemanager-sdk.com)
+
+## Acknowledgments
+
+- Built with ❤️ using .NET 9 and Clean Architecture principles
+- Inspired by modern cloud-native file management solutions
+- Special thanks to all [contributors](CONTRIBUTORS.md)
+
+---
+
+**Made with .NET 9** | **Clean Architecture** | **DDD Principles**

@@ -1,0 +1,136 @@
+version: '3.8'
+
+services:
+  # ============================
+  # SeaweedFS Master
+  # ============================
+  master:
+    image: chrislusf/seaweedfs:3.59
+    container_name: seaweedfs-master
+    ports:
+      - "9333:9333"   # Master HTTP
+      - "19333:19333" # Master gRPC
+    command: "master -ip=master -ip.bind=0.0.0.0 -metricsPort=9324"
+    volumes:
+      - master_data:/data
+    networks:
+      - seaweedfs-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9333/cluster/status"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ============================
+  # SeaweedFS Volume Server
+  # ============================
+  volume:
+    image: chrislusf/seaweedfs:3.59
+    container_name: seaweedfs-volume
+    ports:
+      - "8080:8080"   # Volume HTTP
+      - "18080:18080" # Volume gRPC
+    command: "volume -mserver=master:9333 -ip.bind=0.0.0.0 -port=8080 -metricsPort=9325"
+    volumes:
+      - volume_data:/data
+    networks:
+      - seaweedfs-net
+    depends_on:
+      master:
+        condition: service_healthy
+
+  # ============================
+  # SeaweedFS Filer (with notifications)
+  # ============================
+  filer:
+    image: chrislusf/seaweedfs:3.59
+    container_name: seaweedfs-filer
+    ports:
+      - "8888:8888"   # Filer HTTP
+      - "18888:18888" # Filer gRPC
+      - "8111:8111"   # Filer S3 (optional)
+    command: "filer -master=master:9333 -ip.bind=0.0.0.0 -metricsPort=9326"
+    volumes:
+      - filer_data:/data
+      - ./config/filer.toml:/etc/seaweedfs/filer.toml:ro
+    networks:
+      - seaweedfs-net
+    depends_on:
+      master:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  # ============================
+  # SeaweedFS S3 Gateway (Optional)
+  # ============================
+  s3:
+    image: chrislusf/seaweedfs:3.59
+    container_name: seaweedfs-s3
+    ports:
+      - "8333:8333"
+    command: "s3 -filer=filer:8888 -ip.bind=0.0.0.0 -config=/etc/seaweedfs/s3.json"
+    volumes:
+      - ./config/s3.json:/etc/seaweedfs/s3.json:ro
+    networks:
+      - seaweedfs-net
+    depends_on:
+      - filer
+
+  # ============================
+  # RabbitMQ Message Broker
+  # ============================
+  rabbitmq:
+    image: rabbitmq:3.12-management-alpine
+    container_name: rabbitmq
+    ports:
+      - "5672:5672"   # AMQP
+      - "15672:15672" # Management UI
+    environment:
+      RABBITMQ_DEFAULT_USER: seaweed
+      RABBITMQ_DEFAULT_PASS: seaweed123
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    networks:
+      - seaweedfs-net
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "check_running"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ============================
+  # .NET Webhook API
+  # ============================
+  webhook-api:
+    build:
+      context: ./webhook-api
+      dockerfile: Dockerfile
+    container_name: webhook-api
+    ports:
+      - "5000:5000"
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - ASPNETCORE_URLS=http://+:5000
+      - Webhook__SecretKey=your-super-secret-key-change-in-production
+      - RabbitMQ__HostName=rabbitmq
+      - RabbitMQ__Port=5672
+      - RabbitMQ__UserName=seaweed
+      - RabbitMQ__Password=seaweed123
+      - RabbitMQ__Exchange=seaweedfs
+      - RabbitMQ__Queue=seaweedfs_events
+    networks:
+      - seaweedfs-net
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+
+networks:
+  seaweedfs-net:
+    driver: bridge
+
+volumes:
+  master_data:
+  volume_data:
+  filer_data:
+  rabbitmq_data:

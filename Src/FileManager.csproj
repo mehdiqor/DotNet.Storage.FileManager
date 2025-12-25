@@ -1,0 +1,78 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <OutputType>Library</OutputType>
+        <TargetFramework>net9.0</TargetFramework>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <Nullable>enable</Nullable>
+        <Version>1.0.0</Version>
+        <Authors>Mehdi Ghorbani</Authors>
+        <Description>SDK for file manageent with Object Storages</Description>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <PackageReference Include="EasyCaching.Bus.Redis" Version="1.9.2" />
+        <PackageReference Include="EasyCaching.Core" Version="1.9.2" />
+        <PackageReference Include="EasyCaching.HybridCache" Version="1.9.2" />
+        <PackageReference Include="EasyCaching.InMemory" Version="1.9.2" />
+        <PackageReference Include="EasyCaching.Redis" Version="1.9.2" />
+        <PackageReference Include="EasyCaching.Serialization.Json" Version="1.9.2" />
+        <PackageReference Include="EFCoreSecondLevelCacheInterceptor.EasyCaching.Core" Version="5.3.2" />
+        <PackageReference Include="EFCoreSecondLevelCacheInterceptor" Version="5.3.2" />
+        <PackageReference Include="MessagePack" Version="3.1.0" />
+        <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="9.0.10" />
+        <PackageReference Include="Microsoft.Data.SqlClient" Version="6.1.1" />
+        <PackageReference Include="Microsoft.EntityFrameworkCore.Abstractions" Version="9.0.10" />
+        <PackageReference Include="Microsoft.EntityFrameworkCore.Analyzers" Version="9.0.10" />
+        <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" Version="9.0.10" />
+        <PackageReference Include="Microsoft.EntityFrameworkCore.SqlServer" Version="9.0.10" />
+        <PackageReference Include="Microsoft.EntityFrameworkCore.SqlServer.Abstractions" Version="9.0.10" />
+        <PackageReference Include="Microsoft.EntityFrameworkCore.SqlServer.HierarchyId" Version="9.0.10" />
+        <PackageReference Include="Minio" Version="7.0.0" />
+        <PackageReference Include="Newtonsoft.Json" Version="13.0.4" />
+        <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="9.0.3" />
+        <PackageReference Include="OpenTelemetry.Exporter.Prometheus.AspNetCore" Version="1.10.0-beta.1" />
+        <PackageReference Include="OpenTelemetry.Extensions.Hosting" Version="1.10.0" />
+        <PackageReference Include="OpenTelemetry.Instrumentation.AspNetCore" Version="1.10.1" />
+        <PackageReference Include="OpenTelemetry.Instrumentation.Http" Version="1.10.0" />
+        <PackageReference Include="OpenTelemetry.Instrumentation.Runtime" Version="1.10.0" />
+        <PackageReference Include="Polly" Version="8.6.4" />
+        <PackageReference Include="Pomelo.EntityFrameworkCore.MySql" Version="9.0.0" />
+        <PackageReference Include="protobuf-net" Version="3.2.30" />
+        <PackageReference Include="protobuf-net.Core" Version="3.2.30" />
+        <PackageReference Include="StackExchange.Redis" Version="2.7.33" />
+        <PackageReference Include="BCrypt.Net-Next" Version="4.0.3" />
+        <PackageReference Include="Serilog" Version="4.3.0" />
+        <PackageReference Include="Serilog.AspNetCore" Version="9.0.0" />
+        <PackageReference Include="Serilog.Sinks.Graylog" Version="3.1.1" />
+        <PackageReference Include="Wangkanai.Detection" Version="8.20.0" />
+        <PackageReference Include="Wangkanai.Detection.Browser" Version="2.0.1" />
+        <PackageReference Include="Wangkanai.Detection.Core" Version="2.0.1" />
+        <PackageReference Include="Wangkanai.Detection.Crawler" Version="2.0.1" />
+        <PackageReference Include="Wangkanai.Detection.Device" Version="2.0.1" />
+        <PackageReference Include="Wangkanai.Detection.Engine" Version="2.0.1" />
+        <PackageReference Include="Wangkanai.Detection.Platform" Version="2.0.1" />
+        <PackageReference Include="Swashbuckle.AspNetCore" Version="9.0.6" />
+        <PackageReference Include="Swashbuckle.AspNetCore.Filters" Version="9.0.0" />
+        <PackageReference Include="FluentValidation.AspNetCore" Version="11.3.1" />
+        <PackageReference Include="Wiry.Base32.Patched" Version="1.0.6.1" />
+        <PackageReference Include="Microsoft.EntityFrameworkCore" Version="9.0.10" />
+        <PackageReference Include="Pluralize.NET" Version="1.0.2" />
+        <PackageReference Include="EFCore.BulkExtensions" Version="9.0.1" />
+        <PackageReference Include="AspNetCore.HealthChecks.Redis" Version="9.0.0" />
+        <PackageReference Include="AspNetCore.HealthChecks.SqlServer" Version="9.0.0" />
+        <PackageReference Include="AspNetCore.HealthChecks.Uris" Version="9.0.0" />
+        <PackageReference Include="AspNetCore.HealthChecks.UI.Client" Version="9.0.0" />
+        <PackageReference Include="Microsoft.EntityFrameworkCore.Tools" Version="9.0.10">
+            <PrivateAssets>all</PrivateAssets>
+            <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+        </PackageReference>
+        <PackageReference Include="Microsoft.EntityFrameworkCore.Proxies" Version="9.0.10" />
+    </ItemGroup>
+
+    <ItemGroup>
+      <Folder Include="Application\Validators\" />
+      <Folder Include="Common\" />
+    </ItemGroup>
+
+</Project>

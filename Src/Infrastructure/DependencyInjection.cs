@@ -100,6 +100,9 @@ public static class DependencyInjection
         services.Configure<FileManagerOptions>(
             configuration.GetSection(FileManagerOptions.SectionName));
 
+        // Register HttpClient for SeaweedFS
+        services.AddHttpClient("SeaweedFS");
+
         // Register FluentValidation validators
         services.AddValidatorsFromAssemblyContaining<UploadRequestValidator>();
         services.AddValidatorsFromAssemblyContaining<PresignedUploadRequestValidator>();

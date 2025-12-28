@@ -118,8 +118,6 @@ public interface IFileService
     /// - Compares actual file size with expected size from database
     /// - Compares actual content type with expected type from database
     /// - Validates file size is within configured limits (MaxFileSizeBytes)
-    /// - Validates content type is valid and not empty
-    /// - Validates file name is valid
     ///
     /// Automatic metadata fetching (S3/SeaweedFS compatibility):
     /// - If ContentType is null in webhook data, SDK automatically calls GetMetadataAsync

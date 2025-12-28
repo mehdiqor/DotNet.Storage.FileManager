@@ -10,11 +10,12 @@ A comprehensive, provider-agnostic file management SDK for .NET 9 that simplifie
 - 🔌 **Provider-Agnostic Interface**: Work with MinIO, SeaweedFS, and S3-compatible storage through a unified API
 - 🗄️ **Multi-Database Support**: SQL Server, PostgreSQL, MySQL, and SQLite
 - ✅ **Built-in Validation**: FluentValidation-powered request validation with configurable rules
-- 🔒 **Security First**: Hash-based deduplication, virus scanning hooks, and status workflow
+- 🔒 **Security First**: Hash-based deduplication, built-in ClamAV virus scanning, and status workflow
+- 🦠 **Virus Scanning**: Integrated ClamAV support with automatic scanning, caching, and extensible scanner interface
 - 📊 **File Lifecycle Management**: Automatic status transitions (Pending → Validated → Scanned → Available)
 - 🎯 **Clean Architecture**: DDD principles with Domain, Application, and Infrastructure layers
 - 🔄 **Event-Driven Architecture**: Domain events with pluggable message broker support (RabbitMQ, Azure Service Bus, AWS SQS, Kafka, Redis)
-- 🚀 **Performance Optimized**: Batch operations, connection pooling, and efficient queries
+- 🚀 **Performance Optimized**: Batch operations, connection pooling, efficient queries, and scan result caching
 - 📦 **Easy Integration**: Simple dependency injection with minimal configuration
 - 🔌 **Extensible**: User-implemented message brokers and virus scanning services
 
@@ -81,6 +82,16 @@ app.Run();
   "Database": {
     "Provider": "SqlServer",
     "ConnectionString": "Server=(localdb)\\mssqllocaldb;Database=FileManager;Trusted_Connection=True;"
+  },
+  "ClamAV": {
+    "Server": "localhost",
+    "Port": 3310,
+    "MaxFileSizeBytes": 104857600,
+    "ScanTimeoutSeconds": 60,
+    "ConnectionTimeoutSeconds": 10,
+    "MaxRetries": 3,
+    "EnableCaching": true,
+    "CacheExpirationMinutes": 60
   }
 }
 ```
@@ -234,6 +245,84 @@ This guide includes:
 - Best practices for error handling, retry logic, and idempotency
 - Email notification examples
 - Troubleshooting guide
+
+### Virus Scanning Configuration
+
+FileManager SDK includes built-in ClamAV integration for virus scanning. When enabled, files are automatically scanned after validation.
+
+**Enable Virus Scanning**:
+```json
+{
+  "FileManager": {
+    "VirusScanningEnabled": true
+  },
+  "ClamAV": {
+    "Server": "localhost",
+    "Port": 3310,
+    "MaxFileSizeBytes": 104857600,
+    "ScanTimeoutSeconds": 60,
+    "EnableCaching": true
+  }
+}
+```
+
+**Docker Setup** (included in docker-compose.yml):
+```bash
+# Start ClamAV along with other services
+docker-compose up -d clamav
+
+# Check ClamAV status (may take 2-3 minutes to load virus definitions)
+docker logs clamav
+```
+
+**How It Works**:
+1. File is uploaded → status: `Pending`
+2. Validation passes → status: `Uploaded`
+3. Virus scan runs automatically → status: `Available` (clean) or `Rejected` (infected)
+
+**Configuration Options**:
+- `Server`: ClamAV server hostname (default: `localhost`)
+- `Port`: ClamAV daemon port (default: `3310`)
+- `MaxFileSizeBytes`: Max file size to scan (default: 100 MB)
+- `ScanTimeoutSeconds`: Scan operation timeout (default: 60s)
+- `EnableCaching`: Cache scan results by file hash (default: `true`)
+- `CacheExpirationMinutes`: Cache expiration time (default: 60 min)
+
+**Custom Virus Scanner**:
+You can implement your own virus scanner by implementing `IVirusScanningService`:
+```csharp
+public class CustomVirusScanner : IVirusScanningService
+{
+    public async Task<ScanResult> ScanAsync(
+        Stream content,
+        string fileName,
+        CancellationToken cancellationToken = default)
+    {
+        // Your scanning logic (e.g., VirusTotal API, Windows Defender, etc.)
+        return new ScanResult(IsClean: true);
+    }
+
+    public async Task<bool> HealthAsync(CancellationToken cancellationToken = default)
+    {
+        // Check if your scanner service is available
+        return true;
+    }
+}
+
+// Register your custom scanner
+builder.Services.AddSingleton<IVirusScanningService, CustomVirusScanner>();
+```
+
+**Health Check**:
+```csharp
+// Check if ClamAV is available before scanning
+var isHealthy = await _virusScanningService.HealthAsync();
+if (!isHealthy)
+{
+    _logger.LogWarning("ClamAV is not available");
+    // Handle unavailability (skip scan, queue for later, etc.)
+}
+```
 
 ### Advanced Configuration
 

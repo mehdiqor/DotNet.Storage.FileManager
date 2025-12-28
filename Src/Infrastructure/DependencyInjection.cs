@@ -113,12 +113,37 @@ public static class DependencyInjection
         // Register application services
         services.AddScoped<IFileService, FileService>();
 
+        // Register virus scanning service (optional - only if enabled in configuration)
+        AddVirusScanning(services, configuration);
+
         // NOTE: IEventPublisher is user-implemented and must be registered by the user
         // Users should register their own event publisher implementation to handle domain events
         // Example:
         // services.AddSingleton<IEventPublisher, RabbitMQEventPublisher>();
         // services.AddSingleton<IEventPublisher, ValidationEventPublisher>();
         // See MESSAGE-BROKER-IMPLEMENTATION-GUIDE.md for implementation examples
+    }
+
+    /// <summary>
+    /// Registers virus scanning service if virus scanning is enabled in configuration.
+    /// </summary>
+    private static void AddVirusScanning(IServiceCollection services, IConfiguration configuration)
+    {
+        var fileManagerOptions = configuration
+            .GetSection(FileManagerOptions.SectionName)
+            .Get<FileManagerOptions>() ?? new FileManagerOptions();
+
+        // Only register virus scanning service if enabled
+        if (!fileManagerOptions.VirusScanningEnabled) return;
+
+        // Register ClamAV options
+        services.Configure<ClamAvOptions>(configuration.GetSection(ClamAvOptions.SectionName));
+
+        // Register memory cache for scan result caching (if not already registered)
+        services.AddMemoryCache();
+
+        // Register ClamAV scanning service
+        services.AddSingleton<IVirusScanningService, ClamAvScanningService>();
     }
 
     /// <summary>

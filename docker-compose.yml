@@ -100,6 +100,26 @@ services:
       retries: 5
 
   # ============================
+  # ClamAV Antivirus Scanner
+  # ============================
+  clamav:
+    image: clamav/clamav:latest
+    container_name: clamav
+    ports:
+      - "3310:3310"  # ClamAV daemon
+    volumes:
+      - clamav_data:/var/lib/clamav
+    networks:
+      - seaweedfs-net
+    healthcheck:
+      test: ["CMD", "clamdscan", "--ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 120s  # ClamAV takes time to load virus definitions
+    restart: unless-stopped
+
+  # ============================
   # .NET Webhook API
   # ============================
   webhook-api:
@@ -134,3 +154,4 @@ volumes:
   volume_data:
   filer_data:
   rabbitmq_data:
+  clamav_data:

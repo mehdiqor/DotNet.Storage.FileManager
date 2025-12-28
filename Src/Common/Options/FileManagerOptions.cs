@@ -17,12 +17,12 @@ public sealed class FileManagerOptions
     /// <summary>
     /// Enable file validation after upload.
     /// </summary>
-    public bool ValidationEnabled { get; init; } = true;
+    public bool ValidationEnabled { get; init; }
 
     /// <summary>
     /// Enable virus scanning for uploaded files.
     /// </summary>
-    public bool VirusScanningEnabled { get; init; } = false;
+    public bool VirusScanningEnabled { get; init; }
 
     /// <summary>
     /// Default expiration time for presigned URLs.

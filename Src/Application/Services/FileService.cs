@@ -19,7 +19,8 @@ public sealed class FileService(
     IOptions<FileManagerOptions> options,
     ILogger<FileService> logger,
     IObjectStorage storage,
-    IUnitOfWork unitOfWork
+    IUnitOfWork unitOfWork,
+    IEventPublisher? eventPublisher = null
 ) : IFileService
 {
     private readonly FileManagerOptions _options = options.Value;
@@ -76,8 +77,15 @@ public sealed class FileService(
             "File uploaded to storage with key: {StorageKey}",
             uploadResult.StorageKey);
 
-        // TODO: Publish domain events
-        // await _eventPublisher.PublishAsync(fileMetadata.DomainEvents, cancellationToken);
+        // Publish domain events if event publisher is configured
+        if (eventPublisher != null && fileMetadata.DomainEvents.Count > 0)
+        {
+            await eventPublisher.PublishDomainEventsAsync(
+                fileMetadata.DomainEvents,
+                cancellationToken);
+
+            fileMetadata.ClearDomainEvents();
+        }
 
         return fileMetadata;
     }
@@ -247,8 +255,15 @@ public sealed class FileService(
                 "File deleted successfully: {FileId}",
                 fileId);
 
-            // TODO: Publish domain events
-            // await _eventPublisher.PublishAsync(fileMetadata.DomainEvents, cancellationToken);
+            // Publish domain events if event publisher is configured
+            if (eventPublisher != null && fileMetadata.DomainEvents.Count > 0)
+            {
+                await eventPublisher.PublishDomainEventsAsync(
+                    fileMetadata.DomainEvents,
+                    cancellationToken);
+
+                fileMetadata.ClearDomainEvents();
+            }
         }
         catch
         {
@@ -300,7 +315,18 @@ public sealed class FileService(
                 "Files deleted successfully: {Count}",
                 fileIdList.Count);
 
-            // TODO: Publish domain events
+            // Publish domain events if event publisher is configured
+            if (eventPublisher != null)
+            {
+                foreach (var file in fileMetadataList.Where(file => file.DomainEvents.Count > 0))
+                {
+                    await eventPublisher.PublishDomainEventsAsync(
+                        file.DomainEvents,
+                        cancellationToken);
+
+                    file.ClearDomainEvents();
+                }
+            }
         }
         catch
         {
@@ -309,56 +335,191 @@ public sealed class FileService(
         }
     }
 
-    public async Task MarkAsValidatedAsync(
-        Guid fileId,
+    public async Task ValidateFileAsync(
+        string storageKey,
+        StorageObjectMetadata actualMetadata,
         CancellationToken cancellationToken = default)
     {
-        logger.LogInformation("Marking file as validated: {FileId}", fileId);
+        logger.LogInformation(
+            "Validating file with storage key: {StorageKey} using actual metadata from webhook",
+            storageKey);
 
-        var fileMetadata = await GetFileMetadataOrThrowAsync(fileId, cancellationToken);
+        // Look up file metadata by storage key
+        var fileMetadata = await unitOfWork.FileMetadata.GetByStorageKeyAsync(
+            storageKey,
+            cancellationToken);
 
-        fileMetadata.MarkAsValidated();
-        unitOfWork.FileMetadata.Update(fileMetadata);
-        await unitOfWork.SaveChangesAsync(cancellationToken);
+        if (fileMetadata == null)
+        {
+            logger.LogWarning("File not found for storage key: {StorageKey}", storageKey);
+            throw new FileNotFoundException(storageKey);
+        }
 
-        // TODO: Publish domain events
-        // await _eventPublisher.PublishAsync(fileMetadata.DomainEvents, cancellationToken);
-    }
+        // Check if file is in correct status for validation
+        if (fileMetadata.Status != FileStatus.Pending)
+        {
+            logger.LogWarning(
+                "File {FileId} cannot be validated. Current status: {Status}",
+                fileMetadata.Id,
+                fileMetadata.Status);
+            return;
+        }
 
-    public async Task MarkAsScannedAsync(
-        Guid fileId,
-        CancellationToken cancellationToken = default)
-    {
-        logger.LogInformation("Marking file as scanned: {FileId}", fileId);
+        // Check if validation is enabled
+        if (!_options.ValidationEnabled)
+        {
+            logger.LogWarning("Validation is disabled in configuration");
 
-        var fileMetadata = await GetFileMetadataOrThrowAsync(fileId, cancellationToken);
+            // If validation is disabled, skip directly to final status
+            if (_options.VirusScanningEnabled)
+            {
+                // Need virus scanning - mark as uploaded
+                fileMetadata.MarkAsUploaded();
+            }
+            else
+            {
+                // No virus scanning needed - mark as available directly
+                fileMetadata.MarkAsAvailable();
+            }
 
-        fileMetadata.MarkAsScanned();
-        unitOfWork.FileMetadata.Update(fileMetadata);
-        await unitOfWork.SaveChangesAsync(cancellationToken);
+            unitOfWork.FileMetadata.Update(fileMetadata);
+            await unitOfWork.SaveChangesAsync(cancellationToken);
+            return;
+        }
 
-        // TODO: Publish domain events
-        // await _eventPublisher.PublishAsync(fileMetadata.DomainEvents, cancellationToken);
-    }
+        try
+        {
+            // Check if webhook data is incomplete (e.g., S3/SeaweedFS missing ContentType)
+            // If so, fetch complete metadata from storage
+            var completeMetadata = actualMetadata;
+            if (string.IsNullOrWhiteSpace(actualMetadata.ContentType))
+            {
+                logger.LogInformation(
+                    "Webhook metadata incomplete for file {FileId}. Fetching complete metadata from storage.",
+                    fileMetadata.Id);
 
-    public async Task RejectFileAsync(
-        Guid fileId,
-        string reason,
-        CancellationToken cancellationToken = default)
-    {
-        logger.LogWarning(
-            "Rejecting file: {FileId}, Reason: {Reason}",
-            fileId,
-            reason);
+                completeMetadata = await storage.GetMetadataAsync(fileMetadata.StorageKey, cancellationToken);
+            }
 
-        var fileMetadata = await GetFileMetadataOrThrowAsync(fileId, cancellationToken);
+            // Perform validation by comparing actual metadata with expected metadata (from database)
+            var validationErrors = new List<string>();
 
-        fileMetadata.Reject(reason);
-        unitOfWork.FileMetadata.Update(fileMetadata);
-        await unitOfWork.SaveChangesAsync(cancellationToken);
+            // Compare actual file size with expected size
+            if (completeMetadata.Size != fileMetadata.Size)
+            {
+                validationErrors.Add(
+                    $"File size mismatch: expected {fileMetadata.Size} bytes, actual {completeMetadata.Size} bytes");
+            }
 
-        // TODO: Publish domain events
-        // await _eventPublisher.PublishAsync(fileMetadata.DomainEvents, cancellationToken);
+            // Check file size limits
+            if (_options.MaxFileSizeBytes > 0 && completeMetadata.Size > _options.MaxFileSizeBytes)
+            {
+                validationErrors.Add(
+                    $"File size {completeMetadata.Size} bytes exceeds maximum allowed size {_options.MaxFileSizeBytes} bytes");
+            }
+
+            // Compare actual content type with expected content type
+            if (!string.Equals(
+                    completeMetadata.ContentType,
+                    fileMetadata.ContentType,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                validationErrors.Add(
+                    $"Content type mismatch: expected '{fileMetadata.ContentType}', actual '{completeMetadata.ContentType}'");
+            }
+
+            // If there are validation errors, delete from storage and reject
+            if (validationErrors.Count > 0)
+            {
+                var errorMessage = string.Join("; ", validationErrors);
+
+                logger.LogWarning(
+                    "File {FileId} validation failed: {Errors}. Deleting from storage.",
+                    fileMetadata.Id,
+                    errorMessage);
+
+                // Delete file from storage
+                try
+                {
+                    await storage.RemoveAsync(fileMetadata.StorageKey, cancellationToken);
+
+                    logger.LogInformation(
+                        "File deleted from storage after validation failure: {StorageKey}",
+                        fileMetadata.StorageKey);
+                }
+                catch (Exception deleteEx)
+                {
+                    logger.LogError(
+                        deleteEx,
+                        "Failed to delete file from storage: {StorageKey}",
+                        fileMetadata.StorageKey);
+                    // Continue with rejection even if deletion fails
+                }
+
+                // Reject the file in database
+                fileMetadata.Reject(errorMessage);
+                unitOfWork.FileMetadata.Update(fileMetadata);
+                await unitOfWork.SaveChangesAsync(cancellationToken);
+
+                return;
+            }
+
+            // Validation passed - determine final status based on virus scanning configuration
+            logger.LogInformation(
+                "File {FileId} validation passed. Virus scanning enabled: {VirusScanningEnabled}",
+                fileMetadata.Id,
+                _options.VirusScanningEnabled);
+
+            if (_options.VirusScanningEnabled)
+            {
+                // Virus scanning is enabled - mark as Uploaded (awaiting scan)
+                fileMetadata.MarkAsUploaded();
+
+                logger.LogInformation(
+                    "File {FileId} status set to Uploaded (awaiting virus scan)",
+                    fileMetadata.Id);
+            }
+            else
+            {
+                // Virus scanning is disabled - mark as Available (ready to use)
+                fileMetadata.MarkAsAvailable();
+
+                logger.LogInformation(
+                    "File {FileId} status set to Available (no virus scanning required)",
+                    fileMetadata.Id);
+            }
+
+            unitOfWork.FileMetadata.Update(fileMetadata);
+            await unitOfWork.SaveChangesAsync(cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(
+                ex,
+                "Error during file validation: {FileId}. Deleting from storage.",
+                fileMetadata.Id);
+
+            // Delete file from storage on validation error
+            try
+            {
+                await storage.RemoveAsync(fileMetadata.StorageKey, cancellationToken);
+                logger.LogInformation(
+                    "File deleted from storage after validation error: {StorageKey}",
+                    fileMetadata.StorageKey);
+            }
+            catch (Exception deleteEx)
+            {
+                logger.LogError(
+                    deleteEx,
+                    "Failed to delete file from storage: {StorageKey}",
+                    fileMetadata.StorageKey);
+                // Continue with rejection even if deletion fails
+            }
+
+            fileMetadata.Reject($"Validation error: {ex.Message}");
+            unitOfWork.FileMetadata.Update(fileMetadata);
+            await unitOfWork.SaveChangesAsync(cancellationToken);
+        }
     }
 
     public async Task<bool> FileExistsAsync(

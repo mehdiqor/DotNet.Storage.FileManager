@@ -95,25 +95,49 @@ public interface IFileService
         CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Marks a file as validated.
+    /// Validates an uploaded file by comparing actual storage metadata (from webhook/event) with expected metadata in database.
+    /// This method should be called when object storage webhook fires after file upload.
+    /// If validation passes and virus scanning is DISABLED, file status transitions to Available.
+    /// If validation passes and virus scanning is ENABLED, file status transitions to Uploaded (awaiting scan).
+    /// If validation fails, the file is DELETED from storage and status is set to Rejected.
     /// </summary>
-    Task MarkAsValidatedAsync(
-        Guid fileId,
-        CancellationToken cancellationToken = default);
-
-    /// <summary>
-    /// Marks a file as scanned (virus scan complete).
-    /// </summary>
-    Task MarkAsScannedAsync(
-        Guid fileId,
-        CancellationToken cancellationToken = default);
-
-    /// <summary>
-    /// Rejects a file with a reason.
-    /// </summary>
-    Task RejectFileAsync(
-        Guid fileId,
-        string reason,
+    /// <param name="storageKey">The storage key of the file received from object storage webhook.</param>
+    /// <param name="actualMetadata">The actual file metadata received from object storage webhook/event.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <remarks>
+    /// Typical workflow:
+    /// 1. File is uploaded to object storage
+    /// 2. Object storage triggers webhook with storage key and actual file metadata (size, content type, etc.)
+    /// 3. Webhook handler calls this method with the storage key and received metadata
+    /// 4. Method looks up file in database by storage key
+    /// 5. If actualMetadata is incomplete (e.g., ContentType is null for S3), method automatically fetches
+    ///    complete metadata from storage using GetMetadataAsync
+    /// 6. Method compares actual metadata with database metadata
+    ///
+    /// The validation logic:
+    /// - Compares actual file size with expected size from database
+    /// - Compares actual content type with expected type from database
+    /// - Validates file size is within configured limits (MaxFileSizeBytes)
+    /// - Validates content type is valid and not empty
+    /// - Validates file name is valid
+    ///
+    /// Automatic metadata fetching (S3/SeaweedFS compatibility):
+    /// - If ContentType is null in webhook data, SDK automatically calls GetMetadataAsync
+    /// - This ensures validation has complete data even for S3 events (which don't include ContentType)
+    /// - No additional code needed in webhook handler
+    ///
+    /// Status transitions:
+    /// - If validation passes AND virus scanning is disabled → status = Available
+    /// - If validation passes AND virus scanning is enabled → status = Uploaded (awaiting scan)
+    /// - If validation fails → status = Rejected + file DELETED from storage
+    ///
+    /// After validation, domain events are published:
+    /// - FileValidatedEvent (on success)
+    /// - FileRejectedEvent (on failure)
+    /// </remarks>
+    Task ValidateFileAsync(
+        string storageKey,
+        StorageObjectMetadata actualMetadata,
         CancellationToken cancellationToken = default);
 
     /// <summary>

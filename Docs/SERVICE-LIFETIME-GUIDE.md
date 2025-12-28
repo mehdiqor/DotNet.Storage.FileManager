@@ -109,8 +109,8 @@ public void ConfigureServices(IServiceCollection services)
     // Factory (resolves singletons)
     services.AddSingleton<IStorageProviderFactory, StorageProviderFactory>();
 
-    // Message broker (connection pooling)
-    services.AddSingleton<IMessageBroker, RabbitMQMessageBroker>();
+    // Event publisher (user-implemented, typically singleton)
+    services.AddSingleton<IEventPublisher, RabbitMQEventPublisher>();
 
     // ============================================
     // SCOPED SERVICES

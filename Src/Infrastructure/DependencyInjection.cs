@@ -113,9 +113,12 @@ public static class DependencyInjection
         // Register application services
         services.AddScoped<IFileService, FileService>();
 
-        // TODO: Register message broker
-        // services.AddSingleton<IMessageBroker, RabbitMQMessageBroker>();
-        // services.AddScoped<IEventPublisher, EventPublisher>();
+        // NOTE: IEventPublisher is user-implemented and must be registered by the user
+        // Users should register their own event publisher implementation to handle domain events
+        // Example:
+        // services.AddSingleton<IEventPublisher, RabbitMQEventPublisher>();
+        // services.AddSingleton<IEventPublisher, ValidationEventPublisher>();
+        // See MESSAGE-BROKER-IMPLEMENTATION-GUIDE.md for implementation examples
     }
 
     /// <summary>

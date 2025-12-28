@@ -13,9 +13,10 @@ A comprehensive, provider-agnostic file management SDK for .NET 9 that simplifie
 - 🔒 **Security First**: Hash-based deduplication, virus scanning hooks, and status workflow
 - 📊 **File Lifecycle Management**: Automatic status transitions (Pending → Validated → Scanned → Available)
 - 🎯 **Clean Architecture**: DDD principles with Domain, Application, and Infrastructure layers
-- 🔄 **Event-Driven**: Domain events for file operations (upload, validate, scan, reject, delete)
+- 🔄 **Event-Driven Architecture**: Domain events with pluggable message broker support (RabbitMQ, Azure Service Bus, AWS SQS, Kafka, Redis)
 - 🚀 **Performance Optimized**: Batch operations, connection pooling, and efficient queries
 - 📦 **Easy Integration**: Simple dependency injection with minimal configuration
+- 🔌 **Extensible**: User-implemented message brokers and virus scanning services
 
 ## Table of Contents
 
@@ -182,6 +183,58 @@ Choose one of the supported storage providers:
 
 See [Database Configuration Guide](Docs/DATABASE-CONFIGURATION.md) for detailed setup instructions.
 
+### Event Handling Configuration
+
+FileManager SDK supports event-driven architecture through a **user-implemented** event handler pattern. The SDK provides the `IEventPublisher` interface, and you implement it to handle file lifecycle events however you want.
+
+**What You Can Do**:
+- Publish events to message brokers (RabbitMQ, Azure Service Bus, AWS SQS, Kafka, Redis)
+- Trigger file validation workflows
+- Send email/SMS notifications
+- Update analytics or audit logs
+- Execute custom business logic
+
+**Quick Example** (Publish to RabbitMQ):
+```csharp
+// Implement IEventPublisher to publish events to RabbitMQ
+public class RabbitMQEventPublisher : IEventPublisher
+{
+    private readonly IConnection _connection;
+    private readonly IModel _channel;
+
+    public async Task PublishDomainEventsAsync(
+        IEnumerable<DomainEvent> events,
+        CancellationToken cancellationToken = default)
+    {
+        foreach (var domainEvent in events)
+        {
+            var routingKey = $"file.{domainEvent.GetType().Name.ToLowerInvariant()}";
+            var json = JsonSerializer.Serialize(domainEvent);
+            var body = Encoding.UTF8.GetBytes(json);
+
+            _channel.BasicPublish(
+                exchange: "filemanager.events",
+                routingKey: routingKey,
+                body: body);
+        }
+
+        await Task.CompletedTask;
+    }
+}
+
+// Register in DI
+builder.Services.AddSingleton<IEventPublisher, RabbitMQEventPublisher>();
+```
+
+**See the complete implementation guide**: [Event Handling Guide](Docs/EVENT-HANDLING-GUIDE.md)
+
+This guide includes:
+- Complete implementation examples for RabbitMQ, Azure Service Bus, AWS SQS, and more
+- Validation workflow patterns
+- Best practices for error handling, retry logic, and idempotency
+- Email notification examples
+- Troubleshooting guide
+
 ### Advanced Configuration
 
 For multi-provider scenarios, dependency injection patterns, and advanced features:
@@ -239,13 +292,32 @@ return Ok(new { uploadUrl = url });
 ### File Lifecycle Management
 
 ```csharp
-// Validate file after upload
-await _fileService.MarkAsValidatedAsync(fileId);
+// Webhook handler receives upload notification from object storage
+[HttpPost("webhooks/file-uploaded")]
+public async Task<IActionResult> HandleFileUploadedWebhook([FromBody] WebhookPayload payload)
+{
+    // Create actual metadata from webhook
+    var actualMetadata = new StorageObjectMetadata(
+        Key: payload.StorageKey,
+        Size: payload.Size,
+        ETag: payload.ETag,
+        ContentType: payload.ContentType,
+        LastModified: payload.UploadedAt
+    );
 
-// Mark as scanned (virus-free)
-await _fileService.MarkAsScannedAsync(fileId);
+    // Validate file using storage key (compares webhook data with database)
+    // If validation passes and virus scanning disabled → status = Available
+    // If validation passes and virus scanning enabled → status = Uploaded
+    // If validation fails → file deleted from storage, status = Rejected
+    await _fileService.ValidateFileAsync(payload.StorageKey, actualMetadata);
 
-// Reject file if issues found
+    return Ok();
+}
+
+// Mark as available after virus scanning (virus-free)
+await _fileService.MarkAsAvailableAsync(fileId);
+
+// Reject file if virus found
 await _fileService.RejectFileAsync(fileId, "Contains malicious content");
 
 // Delete file
@@ -264,6 +336,64 @@ var pendingFiles = await _fileService.GetPendingFilesAsync();
 foreach (var file in pendingFiles)
 {
     // Process validation or scanning
+}
+```
+
+### Publishing Domain Events
+
+```csharp
+// FileService automatically publishes events when IEventPublisher is registered
+public class FileService : IFileService
+{
+    private readonly IEventPublisher? _eventPublisher;
+
+    public async Task<FileMetadata> UploadFileAsync(UploadRequest request)
+    {
+        // Upload file and save to database
+        var file = await _storage.UploadAsync(request);
+        await _unitOfWork.SaveChangesAsync();
+
+        // Publish domain events if publisher is configured
+        if (_eventPublisher != null)
+        {
+            await _eventPublisher.PublishDomainEventsAsync(
+                file.DomainEvents,
+                cancellationToken);
+
+            file.ClearDomainEvents();
+        }
+
+        return file;
+    }
+}
+
+// Events published:
+// - FileUploadedEvent (when file is uploaded)
+// - FileValidatedEvent (when file passes validation)
+// - FileScannedEvent (when file passes virus scan)
+// - FileRejectedEvent (when file is rejected)
+// - FileDeletedEvent (when file is deleted)
+```
+
+### Consuming Events
+
+```csharp
+// Example consumer listening for file upload events
+public class FileUploadedEventConsumer : IHostedService
+{
+    public async Task ProcessEventAsync(FileUploadedEvent @event)
+    {
+        // Trigger virus scanning
+        await _virusScanner.ScanAsync(@event.FileId);
+
+        // Send notification
+        await _notificationService.NotifyAsync(
+            @event.UserId,
+            $"File {@event.FileName} uploaded successfully");
+
+        // Update analytics
+        await _analytics.TrackUploadAsync(@event.FileId, @event.Size);
+    }
 }
 ```
 
@@ -315,8 +445,10 @@ FileManager SDK follows Clean Architecture and Domain-Driven Design principles:
 - **FileMetadata**: Aggregate root managing file lifecycle and status transitions
 - **IFileService**: Application service orchestrating file operations
 - **IObjectStorage**: Provider-agnostic storage interface
+- **IEventPublisher**: User-implemented event handler for responding to file lifecycle events
 - **Repository Pattern**: Data access abstraction with Unit of Work
 - **Domain Events**: FileUploaded, FileValidated, FileScanned, FileRejected, FileDeleted
+- **ValidateFileAsync**: Called by object storage webhooks to validate files by comparing actual metadata (from webhook) with expected metadata (from database); automatically deletes from storage if validation fails and sets status to Available or Uploaded based on virus scanning configuration
 
 ## Documentation
 
@@ -329,11 +461,12 @@ FileManager SDK follows Clean Architecture and Domain-Driven Design principles:
 - [Usage Guide](Docs/USAGE-GUIDE.md)
 - [Database Configuration](Docs/DATABASE-CONFIGURATION.md)
 - [Dependency Injection](Docs/DI-USAGE-EXAMPLE.md)
+- [Event Handling Implementation](Docs/EVENT-HANDLING-GUIDE.md)
 - [Migration Guide](Docs/MIGRATION-GUIDE.md)
 
 ### Advanced
 - [Architecture Overview](Docs/ARCHITECTURE.md)
-- [Domain Events](Docs/DOMAIN-EVENTS.md)
+- [Domain Events & Event Handling](Docs/EVENT-HANDLING-GUIDE.md)
 - [Custom Storage Provider](Docs/CUSTOM-PROVIDER.md)
 - [Performance Tuning](Docs/PERFORMANCE.md)
 

@@ -247,88 +247,76 @@ public async Task<Stream> DownloadByKeyAsync(string storageKey)
 
 ## File Lifecycle Management
 
-### Complete Workflow Example
+### Validation Workflow (Webhook-based)
+
+The SDK handles file validation automatically when object storage webhooks fire after upload:
 
 ```csharp
-public async Task ProcessUploadedFileAsync(Guid fileId)
+// Webhook handler receives upload notification from object storage
+[HttpPost("webhooks/file-uploaded")]
+public async Task<IActionResult> HandleFileUploadedWebhook([FromBody] S3EventNotification notification)
 {
-    // 1. File is uploaded (status: Pending or Uploaded)
+    foreach (var record in notification.Records)
+    {
+        var storageKey = record.S3.Object.Key;
+
+        // Create actual metadata from webhook
+        var actualMetadata = new StorageObjectMetadata(
+            Key: storageKey,
+            Size: record.S3.Object.Size,
+            ETag: record.S3.Object.ETag,
+            ContentType: null, // S3 doesn't include ContentType - SDK fetches it automatically
+            LastModified: record.EventTime
+        );
+
+        // ValidateFileAsync automatically:
+        // 1. Fetches complete metadata if ContentType is null
+        // 2. Compares actual metadata with database expectations
+        // 3. Validates file size within limits
+        // 4. If validation passes & virus scanning disabled → status = Available
+        // 5. If validation passes & virus scanning enabled → status = Uploaded
+        // 6. If validation fails → deletes from storage, status = Rejected
+        await _fileService.ValidateFileAsync(storageKey, actualMetadata);
+
+        _logger.LogInformation("File validated: {StorageKey}", storageKey);
+    }
+
+    return Ok();
+}
+```
+
+### Checking File Status
+
+```csharp
+public async Task<FileStatus> CheckFileStatusAsync(Guid fileId)
+{
     var file = await _fileService.GetFileMetadataAsync(fileId);
 
     if (file == null)
         throw new FileNotFoundException(fileId);
 
     _logger.LogInformation(
-        "Processing file: {FileId}, Current status: {Status}",
+        "File: {FileId}, Status: {Status}",
         fileId,
         file.Status);
 
-    // 2. Validate file
-    if (await ValidateFileAsync(file))
-    {
-        await _fileService.MarkAsValidatedAsync(fileId);
-        _logger.LogInformation("File validated: {FileId}", fileId);
-    }
-    else
-    {
-        await _fileService.RejectFileAsync(
-            fileId,
-            "File validation failed");
-        return;
-    }
-
-    // 3. Scan for viruses
-    if (await ScanForVirusesAsync(file))
-    {
-        await _fileService.MarkAsScannedAsync(fileId);
-        _logger.LogInformation("File scanned: {FileId}", fileId);
-    }
-    else
-    {
-        await _fileService.RejectFileAsync(
-            fileId,
-            "Virus detected");
-        return;
-    }
-
-    // 4. File is now Available
-    _logger.LogInformation("File ready: {FileId}", fileId);
-}
-
-private async Task<bool> ValidateFileAsync(FileMetadata file)
-{
-    // Implement your validation logic
-    // - Check file size
-    // - Validate content type
-    // - Verify file integrity
-    return true;
-}
-
-private async Task<bool> ScanForVirusesAsync(FileMetadata file)
-{
-    // Implement virus scanning integration
-    // - Call antivirus API
-    // - Check scan results
-    return true;
+    return file.Status;
 }
 ```
 
-### Reject File
+### Getting Pending Files
 
 ```csharp
-public async Task RejectFileWithReasonAsync(
-    Guid fileId,
-    string reason)
+// Get all files awaiting validation or scanning
+public async Task<IReadOnlyList<FileMetadata>> GetPendingFilesAsync()
 {
-    await _fileService.RejectFileAsync(fileId, reason);
+    var pendingFiles = await _fileService.GetPendingFilesAsync();
 
-    _logger.LogWarning(
-        "File rejected: {FileId}, Reason: {Reason}",
-        fileId,
-        reason);
+    _logger.LogInformation(
+        "Found {Count} pending files",
+        pendingFiles.Count);
 
-    // Optional: Send notification to uploader
-    await NotifyUserAsync(fileId, $"File rejected: {reason}");
+    return pendingFiles;
 }
 ```
 

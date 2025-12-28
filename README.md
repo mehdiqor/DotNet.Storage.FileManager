@@ -314,12 +314,6 @@ public async Task<IActionResult> HandleFileUploadedWebhook([FromBody] WebhookPay
     return Ok();
 }
 
-// Mark as available after virus scanning (virus-free)
-await _fileService.MarkAsAvailableAsync(fileId);
-
-// Reject file if virus found
-await _fileService.RejectFileAsync(fileId, "Contains malicious content");
-
 // Delete file
 await _fileService.DeleteFileAsync(fileId);
 ```
@@ -415,7 +409,7 @@ FileManager SDK follows Clean Architecture and Domain-Driven Design principles:
 │  │  IFileService (Orchestration)                     │  │
 │  │  - UploadFileAsync()                              │  │
 │  │  - DownloadFileAsync()                            │  │
-│  │  - MarkAsValidatedAsync()                         │  │
+│  │  - ValidateFileAsync()                            │  │
 │  └──────────────────────────────────────────────────┘  │
 └────────────────────┬────────────────────────────────────┘
                      │

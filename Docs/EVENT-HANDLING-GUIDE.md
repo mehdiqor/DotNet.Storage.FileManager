@@ -104,11 +104,11 @@ var file = await _fileService.UploadFileAsync(request);
 
 // When object storage webhook triggers validation
 await _fileService.ValidateFileAsync(storageKey, actualMetadata);
-// → FileValidatedEvent or FileRejectedEvent is raised
+// → FileValidatedEvent is raised (if validation passes)
+// → FileRejectedEvent is raised (if validation fails)
 
-// When you mark a file as available (after virus scanning)
-await _fileService.MarkAsAvailableAsync(fileId);
-// → FileScannedEvent is raised
+// Note: FileScannedEvent is raised when the domain entity's MarkAsAvailable() method is called
+// External virus scanning integration would trigger this event
 ```
 
 ## Domain Events Reference
@@ -146,8 +146,8 @@ public record FileValidatedEvent(
 ```
 
 **When**: After `ValidateFileAsync` succeeds
-**Status**: File is now `Uploaded`
-**Common Actions**: Trigger virus scanning, send validation success notification
+**Status**: File is now `Uploaded` (if virus scanning enabled) or `Available` (if virus scanning disabled)
+**Common Actions**: Trigger virus scanning (if enabled), send validation success notification
 
 ### FileScannedEvent
 
@@ -160,9 +160,10 @@ public record FileScannedEvent(
 ) : DomainEvent(OccurredAt);
 ```
 
-**When**: After `MarkAsAvailableAsync` is called
+**When**: When the file status transitions to `Available` (via domain entity's MarkAsAvailable method)
 **Status**: File is now `Available`
 **Common Actions**: Send availability notification, process the file, allow downloads
+**Note**: Currently triggered by domain logic; external virus scanning integration would need to be implemented
 
 ### FileRejectedEvent
 
@@ -176,9 +177,10 @@ public record FileRejectedEvent(
 ) : DomainEvent(OccurredAt);
 ```
 
-**When**: After `RejectFileAsync` is called
+**When**: When the file is rejected (via ValidateFileAsync when validation fails)
 **Status**: File is now `Rejected`
-**Common Actions**: Send rejection notification, delete from storage, alert user
+**Common Actions**: Send rejection notification, alert user
+**Note**: ValidateFileAsync automatically deletes the file from storage when validation fails
 
 ### FileDeletedEvent
 

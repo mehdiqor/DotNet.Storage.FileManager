@@ -156,11 +156,11 @@ The Application Layer orchestrates use cases and coordinates between layers.
 public interface IFileService
 {
     Task<FileMetadata> UploadFileAsync(UploadRequest request);
-    Task<PresignedUploadResponse> GeneratePresignedUploadUrlAsync(...);
+    Task<string> GeneratePresignedUploadUrlAsync(PresignedUploadRequest request);
     Task<Stream> DownloadFileAsync(Guid fileId);
     Task<FileMetadata?> GetFileMetadataAsync(Guid fileId);
     Task DeleteFileAsync(Guid fileId);
-    Task MarkAsValidatedAsync(Guid fileId);
+    Task ValidateFileAsync(string storageKey, StorageObjectMetadata actualMetadata);
     // ... more methods
 }
 ```

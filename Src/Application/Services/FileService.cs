@@ -1,6 +1,7 @@
 using FileManager.Application.DTOs;
 using FileManager.Application.Interfaces;
 using FileManager.Common.Options;
+using FileManager.Common.Utilities;
 using FileManager.Domain.Entities;
 using FileManager.Domain.Enums;
 using FileManager.Domain.Exceptions;
@@ -44,7 +45,7 @@ public sealed class FileService(
         }
 
         // Generate storage key before upload to ensure metadata exists first
-        var storageKey = $"{request.Path}/{Guid.NewGuid()}";
+        var storageKey = StorageKeyGenerator.Build(request.Path, request.FileName);
 
         // Create file metadata FIRST (before upload)
         var fileMetadata = FileMetadata.Create(
@@ -75,9 +76,6 @@ public sealed class FileService(
             "File uploaded to storage with key: {StorageKey}",
             uploadResult.StorageKey);
 
-        // TODO: If uploadResult.StorageKey != storageKey, update metadata
-        // This may require adding UpdateStorageKey method to FileMetadata domain entity
-
         // TODO: Publish domain events
         // await _eventPublisher.PublishAsync(fileMetadata.DomainEvents, cancellationToken);
 
@@ -93,7 +91,7 @@ public sealed class FileService(
             request.FileName);
 
         // Generate storage key before creating metadata
-        var storageKey = $"{request.Path}/{Guid.NewGuid()}";
+        var storageKey = StorageKeyGenerator.Build(request.Path, request.FileName);
 
         // Create file metadata FIRST (before generating presigned URL)
         // Note: Size and Hash are unknown at this point, will be updated after actual upload

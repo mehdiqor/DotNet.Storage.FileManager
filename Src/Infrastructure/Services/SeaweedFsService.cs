@@ -6,6 +6,7 @@ using System.Text.Json;
 using FileManager.Application.DTOs;
 using FileManager.Application.Interfaces;
 using FileManager.Common.Options;
+using FileManager.Common.Utilities;
 using FileManager.Domain.Enums;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -47,7 +48,7 @@ public class SeaweedFsService : IObjectStorage
     {
         try
         {
-            var storageKey = BuildStorageKey(request.Path, request.FileName);
+            var storageKey = StorageKeyGenerator.Build(request.Path, request.FileName);
             var fileUrl = BuildFileUrl(storageKey);
 
             _logger.LogInformation(
@@ -116,7 +117,7 @@ public class SeaweedFsService : IObjectStorage
     {
         try
         {
-            var storageKey = BuildStorageKey(request.Path, request.FileName);
+            var storageKey = StorageKeyGenerator.Build(request.Path, request.FileName);
             var fileUrl = BuildFileUrl(storageKey);
 
             _logger.LogInformation(
@@ -461,13 +462,6 @@ public class SeaweedFsService : IObjectStorage
     // ============================
     // Private Helper Methods
     // ============================
-    private static string BuildStorageKey(string path, string fileName)
-    {
-        var cleanPath = path.Trim('/');
-        return string.IsNullOrWhiteSpace(cleanPath)
-            ? fileName
-            : $"{cleanPath}/{fileName}";
-    }
 
     private string BuildFileUrl(string storageKey)
     {
